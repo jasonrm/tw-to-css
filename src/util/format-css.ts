@@ -15,25 +15,25 @@ export const formatCSS = (css: string) => ({
     );
   },
   merge() {
+    let mediaQueries = '';
+    const mediaRegex = /(?<media>@(media|container)\s*\([^\)]*\))\s*\{(?<content>[^\}]*)\}/gm;
+    let matchMedia: RegExpExecArray | null;
+    while ((matchMedia = mediaRegex.exec(css)) !== null) {
+      const { media, content } = matchMedia.groups!;
+      mediaQueries += `\n\r${media} {\n\r${this.extractCSS(content, true)}}\n\r`;
+    }
+    const cssWithoutMediaQueries = css.replace(mediaRegex, '');
+
     const blockContentRegex = /(?<=\.)[^{]+\s*\{(?<content>[^{}]*(?:(?<=;)\s*\n\r?[^{}]*)*)\s*\}/gm;
     let matchBlock: RegExpExecArray | null;
     let blockContent = "";
 
-    while ((matchBlock = blockContentRegex.exec(css)) !== null) {
+    while ((matchBlock = blockContentRegex.exec(cssWithoutMediaQueries)) !== null) {
       const { content } = matchBlock.groups!;
       blockContent += content;
     }
 
-    let mergedCSS = this.extractCSS(blockContent);
-
-    const mediaRegex = /(?<media>@media\s*\([^\)]*\))\s*\{(?<content>[^\}]*)\}/gm;
-    let matchMedia: RegExpExecArray | null;
-    while ((matchMedia = mediaRegex.exec(css)) !== null) {
-      const { media, content } = matchMedia.groups!;
-      mergedCSS += `\n\r${media} {\n\r${this.extractCSS(content, true)}}\n\r`;
-    }
-
-    css = mergedCSS;
+    css = this.extractCSS(blockContent) + mediaQueries;
 
     return this;
   },
@@ -46,23 +46,31 @@ export const formatCSS = (css: string) => ({
   },
   combineMediaQueries() {
     const regex = new RegExp(
-      "@media\\s*(?<conditions>\\([^)]+\\))\\s*{(?<content>(?:[^{}]+|{(?:[^{}]+|{[^{}]*})*})+)}",
+      "@(media|container)\\s*(?<conditions>\\([^)]+\\))\\s*{(?<content>(?:[^{}]+|{(?:[^{}]+|{[^{}]*})*})+)}",
       "gs"
     );
 
     const medias = new Map<string, string>();
 
     const cleanCSS = (cssText: string) =>
-      cssText.replace(regex, (_, conditions, content) => {
-        const mediaContent = medias.get(conditions) ?? "";
-        medias.set(conditions, mediaContent + cleanCSS(content.trim()));
+      cssText.replace(regex, (_, queryType, conditions, content) => {
+        const mediaContent = medias.get(`${queryType}${conditions}`) ?? "";
+        medias.set(
+          `${queryType}${conditions}`,
+          mediaContent + cleanCSS(content),
+        );
         cleanCSS(content);
         return "";
       });
 
     const parts = [];
     parts.push(cleanCSS(css));
-    parts.push(...Array.from(medias, ([condition, content]) => `@media${condition}{${content}}`));
+    parts.push(
+      ...Array.from(
+        medias,
+        ([condition, content]) => `@${condition}{\n\r${content}\n\r}\n\r`,
+      ),
+    );
 
     css = parts.join("");
 
@@ -105,7 +113,7 @@ export const formatCSS = (css: string) => ({
     return this;
   },
   removeMediaQueries() {
-    css = css.replace(/@media[^\{]+\{[^@]+\}/g, "");
+    css = css.replace(/@(media|container)[^\{]+\{[^@]+\}/g, "");
 
     return this;
   },
